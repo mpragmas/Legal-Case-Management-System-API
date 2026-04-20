@@ -1,0 +1,6 @@
+@LegalCaseAPI_HostAddress = http://localhost:5082
+
+GET {{LegalCaseAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
