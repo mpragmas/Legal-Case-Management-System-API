@@ -8,4 +8,13 @@ public class ApplicationUser
     public string Email { get; set; } = "";
     public string PasswordHash { get; set; } = "";
     public string? PhoneNumber { get; set; }
+
+    // 2FA
+    public bool TwoFactorEnabled { get; set; } = false;
+    public string? TwoFactorCode { get; set; }
+    public DateTime? TwoFactorExpiry { get; set; }
+
+    // Password Reset
+    public string? ResetToken { get; set; }
+    public DateTime? ResetTokenExpiry { get; set; }
 }
