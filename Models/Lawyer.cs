@@ -15,4 +15,5 @@ public class Lawyer
     public int MaxClients { get; set; } = 2;
     public ICollection<LawyerRequest> Requests { get; set; } = new List<LawyerRequest>();
     public ICollection<Case> Cases { get; set; } = new List<Case>();
+    public ICollection<Review> Reviews { get; set; } = new List<Review>();
 }
