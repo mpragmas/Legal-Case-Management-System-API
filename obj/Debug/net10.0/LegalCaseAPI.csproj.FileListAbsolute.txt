@@ -141,3 +141,8 @@ D:\backup\Legal case\backend\obj\Debug\net10.0\refint\LegalCaseAPI.dll
 D:\backup\Legal case\backend\obj\Debug\net10.0\LegalCaseAPI.pdb
 D:\backup\Legal case\backend\obj\Debug\net10.0\LegalCaseAPI.genruntimeconfig.cache
 D:\backup\Legal case\backend\obj\Debug\net10.0\ref\LegalCaseAPI.dll
+D:\backup\Legal case\backend\obj\Debug\net10.0\LegalCaseAPI.sourcelink.json
+D:\backup\Legal case\backend\bin\Debug\net10.0\Otp.NET.dll
+D:\backup\Legal case\backend\bin\Debug\net10.0\BouncyCastle.Cryptography.dll
+D:\backup\Legal case\backend\bin\Debug\net10.0\MailKit.dll
+D:\backup\Legal case\backend\bin\Debug\net10.0\MimeKit.dll

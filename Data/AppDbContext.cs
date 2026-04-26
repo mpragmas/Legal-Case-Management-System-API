@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Review> Reviews => Set<Review>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,6 +73,18 @@ public class AppDbContext : DbContext
             .HasOne(d => d.Case)
             .WithMany(c => c.Documents)
             .HasForeignKey(d => d.CaseId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Review>()
+            .HasOne(r => r.Lawyer)
+            .WithMany(l => l.Reviews)
+            .HasForeignKey(r => r.LawyerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Review>()
+            .HasOne(r => r.Client)
+            .WithMany(c => c.Reviews)
+            .HasForeignKey(r => r.ClientId)
             .OnDelete(DeleteBehavior.Cascade);
     }
 }

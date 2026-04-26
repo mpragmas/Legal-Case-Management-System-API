@@ -7,6 +7,7 @@ namespace LegalCaseAPI.Controllers;
 
 [ApiController]
 [Route("api/clients")]
+[Authorize]
 public class ClientsController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -46,13 +47,16 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateClientDto dto)
     {
-        var client = await _db.Clients.FindAsync(id);
+        var client = await _db.Clients.Include(c => c.User).FirstOrDefaultAsync(c => c.Id == id);
         if (client == null) return NotFound();
 
-        if (!string.IsNullOrEmpty(dto.FullName)) client.FullName = dto.FullName;
+        if (!string.IsNullOrEmpty(dto.FullName))
+        {
+            client.FullName = dto.FullName;
+            client.User.FullName = dto.FullName;
+        }
         if (dto.Phone != null) client.Phone = dto.Phone;
         if (dto.Address != null) client.Address = dto.Address;
 

@@ -4,11 +4,15 @@ using LegalCaseAPI.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using LegalCaseAPI.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+
+// Services
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 // Database
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -19,6 +23,7 @@ var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.MapInboundClaims = false; // Keep JWT claim names as-is (sub, role, email)
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -37,7 +42,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
-        policy.WithOrigins("http://localhost:5173", "http://localhost:3000")
+        policy.WithOrigins("http://localhost:5173", "http://localhost:5174", "http://localhost:3000")
               .AllowAnyMethod()
               .AllowAnyHeader());
 });
@@ -50,11 +55,40 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Auto-migrate and seed
+// Auto-migrate/create and seed
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+
+    // Add Status column to Cases if missing (schema patch for existing databases)
+    try
+    {
+        db.Database.ExecuteSqlRaw(@"
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(N'Cases') AND name = N'Status'
+            )
+            BEGIN
+                ALTER TABLE Cases ADD Status nvarchar(50) NOT NULL DEFAULT 'active'
+            END
+
+            -- ApplicationUsers 2FA patch
+            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'ApplicationUsers') AND name = N'TwoFactorCode')
+            BEGIN
+                ALTER TABLE ApplicationUsers ADD TwoFactorCode nvarchar(max) NULL
+            END
+            IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'ApplicationUsers') AND name = N'TwoFactorExpiry')
+            BEGIN
+                ALTER TABLE ApplicationUsers ADD TwoFactorExpiry datetime2 NULL
+            END
+        ");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Schema patch] Could not add Status column: {ex.Message}");
+    }
+
     SeedData(db);
 }
 
@@ -68,14 +102,13 @@ static void SeedData(AppDbContext db)
     var uLD = new ApplicationUser { Id = "u-lawyer-demo", FullName = "Sarah Mitchell", Email = "lawyer@example.com", Role = "lawyer", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
     var uCD = new ApplicationUser { Id = "u-client-demo", FullName = "Michael Torres", Email = "client@example.com", Role = "client", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
     // Named accounts
-    var u1 = new ApplicationUser { Id = "u-l1", FullName = "Sarah Mitchell", Email = "sarah.mitchell@legaldesk.com", Role = "lawyer", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
     var u2 = new ApplicationUser { Id = "u-l2", FullName = "David Hernandez", Email = "david.hernandez@legaldesk.com", Role = "lawyer", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
     var u3 = new ApplicationUser { Id = "u-l3", FullName = "Olivia Chen", Email = "olivia.chen@legaldesk.com", Role = "lawyer", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
     var u4 = new ApplicationUser { Id = "u-l4", FullName = "James Kowalski", Email = "james.kowalski@legaldesk.com", Role = "lawyer", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
-    var u5 = new ApplicationUser { Id = "u-c1", FullName = "Michael Torres", Email = "michael.torres@email.com", Role = "client", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
     var u6 = new ApplicationUser { Id = "u-c2", FullName = "Emily Watson", Email = "emily.watson@email.com", Role = "client", PasswordHash = BCrypt.Net.BCrypt.HashPassword("password") };
 
-    db.ApplicationUsers.AddRange(uLD, uCD, u1, u2, u3, u4, u5, u6);
+    // Remove orphaned u1 (u-l1) and u5 (u-c1) — they were duplicates with no profiles
+    db.ApplicationUsers.AddRange(uLD, uCD, u2, u3, u4, u6);
     db.SaveChanges();
 
     // Demo lawyer gets id=1, demo client gets id=1
@@ -87,58 +120,52 @@ static void SeedData(AppDbContext db)
     db.Clients.Add(cDemo);
     db.SaveChanges();
 
-    // Other lawyers (for display in lawyers list)
-    var l2 = new Lawyer { UserId = "u-l2", FullName = "David Hernandez", YearsOfExperience = 8, Specialization = "Criminal Defense", Bio = "David is a passionate criminal defense lawyer who believes in justice for all. He specializes in federal cases and white-collar crime defense.", Avatar = "DH", Rating = 4.7, CasesWon = 98, MaxClients = 2 };
-    var l3 = new Lawyer { UserId = "u-l3", FullName = "Olivia Chen", YearsOfExperience = 15, Specialization = "Family Law", Bio = "Olivia is one of the most respected family law attorneys in the state. She handles divorce, custody, and adoption cases with empathy and precision.", Avatar = "OC", Rating = 4.8, CasesWon = 210, MaxClients = 2 };
-    var l4 = new Lawyer { UserId = "u-l4", FullName = "James Kowalski", YearsOfExperience = 10, Specialization = "Civil Litigation", Bio = "James brings a strategic, analytical approach to civil litigation. He excels in contract disputes, personal injury, and property law.", Avatar = "JK", Rating = 4.6, CasesWon = 115, MaxClients = 2 };
-    // Named sarah account also gets a lawyer profile
-    var l1Named = new Lawyer { UserId = "u-l1", FullName = "Sarah Mitchell", YearsOfExperience = 12, Specialization = "Corporate Law", Bio = "Sarah is a seasoned corporate attorney with over a decade of experience.", Avatar = "SM", Rating = 4.9, CasesWon = 142, MaxClients = 2 };
+    // Other lawyers
+    var l2 = new Lawyer { UserId = "u-l2", FullName = "David Hernandez", YearsOfExperience = 8, Specialization = "Criminal Defense", Bio = "David is a passionate criminal defense lawyer who specializes in federal cases and white-collar crime defense.", Avatar = "DH", Rating = 4.7, CasesWon = 98, MaxClients = 2 };
+    var l3 = new Lawyer { UserId = "u-l3", FullName = "Olivia Chen", YearsOfExperience = 15, Specialization = "Family Law", Bio = "Olivia is respected for her precision in handle divorce and custody cases.", Avatar = "OC", Rating = 4.8, CasesWon = 210, MaxClients = 2 };
+    var l4 = new Lawyer { UserId = "u-l4", FullName = "James Kowalski", YearsOfExperience = 10, Specialization = "Civil Litigation", Bio = "James excels in contract disputes and property law.", Avatar = "JK", Rating = 4.6, CasesWon = 115, MaxClients = 2 };
 
-    db.Lawyers.AddRange(l2, l3, l4, l1Named);
+    db.Lawyers.AddRange(l2, l3, l4);
     db.SaveChanges();
 
     // Other clients
     var c2 = new Client { UserId = "u-c2", FullName = "Emily Watson", Phone = "+1 555-0202", Address = "1580 Oak Lane, Apt 4B, Los Angeles, CA 90015", Avatar = "EW" };
-    var c1Named = new Client { UserId = "u-c1", FullName = "Michael Torres", Phone = "+1 555-0101", Address = "742 Maple Avenue, Suite 200, New York, NY 10001", Avatar = "MT" };
-    db.Clients.AddRange(c2, c1Named);
+    db.Clients.Add(c2);
     db.SaveChanges();
 
-    // Requests — use demo accounts' IDs (lDemo.Id=1, cDemo.Id=1)
-    var r1 = new LawyerRequest { LawyerId = lDemo.Id, ClientId = cDemo.Id, Status = "approved", Message = "I need legal counsel for a corporate merger involving two subsidiaries.", RequestedAt = new DateTime(2026, 4, 1, 10, 0, 0) };
-    var r2 = new LawyerRequest { LawyerId = l3.Id, ClientId = c2.Id, Status = "approved", Message = "Seeking representation for a custody arrangement modification.", RequestedAt = new DateTime(2026, 4, 3, 14, 30, 0) };
-    var r3 = new LawyerRequest { LawyerId = l2.Id, ClientId = cDemo.Id, Status = "pending", Message = "I would like to discuss a federal investigation related to my business.", RequestedAt = new DateTime(2026, 4, 10, 9, 15, 0) };
-    var r4 = new LawyerRequest { LawyerId = l4.Id, ClientId = c2.Id, Status = "pending", Message = "I have a contract dispute with a former business partner.", RequestedAt = new DateTime(2026, 4, 12, 16, 45, 0) };
-
-    db.LawyerRequests.AddRange(r1, r2, r3, r4);
+    // Requests
+    var r1 = new LawyerRequest { LawyerId = lDemo.Id, ClientId = cDemo.Id, Status = "approved", Message = "I need legal counsel for a corporate merger.", RequestedAt = DateTime.UtcNow.AddDays(-20) };
+    var r2 = new LawyerRequest { LawyerId = l3.Id, ClientId = c2.Id, Status = "approved", Message = "Seeking representation for a custody arrangement.", RequestedAt = DateTime.UtcNow.AddDays(-15) };
+    
+    db.LawyerRequests.AddRange(r1, r2);
     db.SaveChanges();
 
-    // Cases — use demo accounts
-    var case1 = new Case { LawyerId = lDemo.Id, ClientId = cDemo.Id, RequestId = r1.Id, Title = "TechCorp Merger Advisory", Description = "Providing legal counsel and documentation for the merger of TechCorp's North American and European divisions.", Status = "active", CreatedAt = new DateTime(2026, 4, 2, 8, 0, 0) };
-    var case2 = new Case { LawyerId = l3.Id, ClientId = c2.Id, RequestId = r2.Id, Title = "Watson Custody Modification", Description = "Representing the client in modifying the existing custody arrangement.", Status = "active", CreatedAt = new DateTime(2026, 4, 4, 10, 0, 0) };
+    // Cases
+    var case1 = new Case { LawyerId = lDemo.Id, ClientId = cDemo.Id, RequestId = r1.Id, Title = "TechCorp Merger Advisory", Description = "Legal counsel for the merger of TechCorp's divisions.", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-19) };
+    var case2 = new Case { LawyerId = l3.Id, ClientId = c2.Id, RequestId = r2.Id, Title = "Watson Custody Modification", Description = "Modifying the existing custody arrangement.", Status = "active", CreatedAt = DateTime.UtcNow.AddDays(-14) };
 
     db.Cases.AddRange(case1, case2);
     db.SaveChanges();
 
+    // Appointments
     var today = DateTime.Today.ToString("yyyy-MM-dd");
-    var tomorrow = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd");
-    var dayAfter = DateTime.Today.AddDays(2).ToString("yyyy-MM-dd");
-
     db.Appointments.AddRange(
-        new Appointment { LawyerId = lDemo.Id, ClientId = cDemo.Id, CaseId = case1.Id, Date = today, Time = "23:00", Duration = 60, Status = "confirmed", Notes = "Reviewed merger timeline and key milestones. Client approved the preliminary due-diligence checklist." },
-        new Appointment { LawyerId = lDemo.Id, ClientId = null, CaseId = null, Date = tomorrow, Time = "14:00", Duration = 60, Status = "available", Notes = "" },
-        new Appointment { LawyerId = l3.Id, ClientId = c2.Id, CaseId = case2.Id, Date = tomorrow, Time = "11:00", Duration = 45, Status = "confirmed", Notes = "" },
-        new Appointment { LawyerId = lDemo.Id, ClientId = null, CaseId = null, Date = dayAfter, Time = "09:00", Duration = 60, Status = "available", Notes = "" },
-        new Appointment { LawyerId = l3.Id, ClientId = null, CaseId = null, Date = dayAfter, Time = "15:00", Duration = 45, Status = "available", Notes = "" },
-        new Appointment { LawyerId = l2.Id, ClientId = null, CaseId = null, Date = tomorrow, Time = "10:00", Duration = 60, Status = "available", Notes = "" },
-        new Appointment { LawyerId = lDemo.Id, ClientId = cDemo.Id, CaseId = case1.Id, Date = "2026-04-10", Time = "10:00", Duration = 60, Status = "completed", Notes = "Initial consultation completed. Discussed scope of the merger and legal requirements." }
+        new Appointment { LawyerId = lDemo.Id, ClientId = cDemo.Id, CaseId = case1.Id, Date = today, Time = "10:00", Duration = 60, Status = "confirmed", Notes = "Reviewing merger docs." },
+        new Appointment { LawyerId = lDemo.Id, ClientId = null, CaseId = null, Date = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd"), Time = "14:00", Duration = 60, Status = "available", Notes = "" }
     );
     db.SaveChanges();
 
+    // Documents
     db.Documents.AddRange(
-        new Document { CaseId = case1.Id, FileName = "Merger_Agreement_Draft_v1.pdf", FilePath = "", Size = "2.4 MB", UploadedBy = "1", UploadedAt = new DateTime(2026, 4, 5, 12, 0, 0) },
-        new Document { CaseId = case1.Id, FileName = "Due_Diligence_Checklist.xlsx", FilePath = "", Size = "540 KB", UploadedBy = "1", UploadedAt = new DateTime(2026, 4, 6, 9, 30, 0) },
-        new Document { CaseId = case2.Id, FileName = "Custody_Modification_Petition.pdf", FilePath = "", Size = "1.1 MB", UploadedBy = "3", UploadedAt = new DateTime(2026, 4, 7, 14, 0, 0) },
-        new Document { CaseId = case1.Id, FileName = "Financial_Statements_Q1.pdf", FilePath = "", Size = "3.8 MB", UploadedBy = "1", UploadedAt = new DateTime(2026, 4, 8, 11, 0, 0) }
+        new Document { CaseId = case1.Id, FileName = "Merger_Draft.pdf", FilePath = "/uploads/merger.pdf", Size = "2.4 MB", UploadedBy = "u-lawyer-demo", UploadedAt = DateTime.UtcNow.AddDays(-5) },
+        new Document { CaseId = case2.Id, FileName = "Petition.pdf", FilePath = "/uploads/petition.pdf", Size = "1.1 MB", UploadedBy = "u-l3", UploadedAt = DateTime.UtcNow.AddDays(-3) }
+    );
+    db.SaveChanges();
+
+    // Reviews
+    db.Reviews.AddRange(
+        new Review { LawyerId = lDemo.Id, ClientId = cDemo.Id, Rating = 5, Comment = "Excellent service! Sarah is extremely knowledgeable.", CreatedAt = DateTime.UtcNow.AddDays(-10) },
+        new Review { LawyerId = l3.Id, ClientId = c2.Id, Rating = 4, Comment = "Very professional and helpful.", CreatedAt = DateTime.UtcNow.AddDays(-5) }
     );
     db.SaveChanges();
 }

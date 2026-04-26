@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("LegalCaseAPI")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+96273bcc1e5cd95aca33e41cbfbd8a58ebce7278")]
 [assembly: System.Reflection.AssemblyProductAttribute("LegalCaseAPI")]
 [assembly: System.Reflection.AssemblyTitleAttribute("LegalCaseAPI")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
